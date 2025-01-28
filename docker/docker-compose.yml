@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  magento:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "80:80"
+    volumes:
+      - ../src:/var/www/html
+      - magento-media:/var/www/html/pub/media
+    environment:
+      - MAGENTO_MODE=developer
+      - MYSQL_HOST=db
+      - MYSQL_DATABASE=magento
+      - MYSQL_USER=magento
+      - MYSQL_PASSWORD=magento123
+    depends_on:
+      - db
+
+  db:
+    image: mysql:8.0
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_DATABASE=magento
+      - MYSQL_USER=magento
+      - MYSQL_PASSWORD=magento123
+      - MYSQL_ROOT_PASSWORD=root123
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+volumes:
+  magento-media:
+  mysql-data:

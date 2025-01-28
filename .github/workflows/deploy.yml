@@ -1,0 +1,85 @@
+name: Deploy to AWS Lightsail
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Checkout Repository
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 2: Set Environment Variables
+      - name: Set Environment Variables
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "ENV=production" >> $GITHUB_ENV
+            echo "LIGHTSAIL_INSTANCE=magento2-prod" >> $GITHUB_ENV
+          else
+            echo "ENV=staging" >> $GITHUB_ENV
+            echo "LIGHTSAIL_INSTANCE=magento2-staging" >> $GITHUB_ENV
+
+      # Step 3: Configure AWS Credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Step 4: Run Tests
+      - name: Run Unit Tests
+        run: |
+          php bin/magento dev:tests:run unit
+
+      - name: Lint Dockerfile
+        run: |
+          docker run --rm -v $(pwd):/app hadolint/hadolint < docker/Dockerfile
+
+      # Step 5: Build Docker Image
+      - name: Build Docker image
+        run: |
+          docker build -t magento2-app:${{ github.sha }} -f docker/Dockerfile .
+          docker save magento2-app:${{ github.sha }} > image.tar
+
+      # Step 6: Deploy Docker Image to AWS Lightsail
+      - name: Deploy to Lightsail
+        run: |
+          aws lightsail push-container-image \
+            --region ${{ env.AWS_REGION }} \
+            --service-name ${{ env.LIGHTSAIL_INSTANCE }} \
+            --label magento2-app \
+            --image-name magento2-app:${{ github.sha }}
+
+      - name: Update Lightsail Deployment
+        run: |
+          aws lightsail create-container-service-deployment \
+            --service-name ${{ env.LIGHTSAIL_INSTANCE }} \
+            --containers '{"magento2-app":{"image":"magento2-app:${{ github.sha }}","ports":{"80":"HTTP"}}}' \
+            --public-endpoint '{"containerName":"magento2-app","containerPort":80,"healthCheck":{"path":"/health"}}'
+
+      # Step 7: Post-Deployment Translation with AWS Translate (Example GenAI Integration)
+      - name: Translate Content (AWS Translate)
+        run: |
+          aws translate translate-text \
+            --region ${{ env.AWS_REGION }} \
+            --source-language-code "en" \
+            --target-language-code "fr" \
+            --text "Welcome to Magento 2 Store!" \
+            --output json
+
+      # Step 8: Notify Team via Slack
+      - name: Notify Slack
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          STATUS: ${{ job.status }}
